@@ -260,6 +260,12 @@ struct SupacodeApp: App {
           else { return nil }
           return state.activeSurfaceID(for: tabID)
         },
+        focusedSurfacePWD: { worktreeID in
+          terminalManager.stateIfExists(for: worktreeID)?.focusedSurfacePWD()
+        },
+        surfaceCount: { worktreeID in
+          terminalManager.stateIfExists(for: worktreeID)?.surfaceCount() ?? 0
+        },
         latestUnreadNotification: {
           terminalManager.latestUnreadNotificationLocation()
         },

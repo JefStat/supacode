@@ -14,6 +14,10 @@ struct TerminalClient {
   /// synchronously before an async dispatch races against AppKit focus reshuffle
   /// (e.g. when a palette dismisses and the leftmost pane reclaims first responder).
   var selectedSurfaceID: @MainActor @Sendable (Worktree.ID) -> UUID?
+  /// Live cwd (OSC 7) of the focused surface in the worktree's selected tab.
+  var focusedSurfacePWD: @MainActor @Sendable (Worktree.ID) -> String?
+  /// Total number of panes open across every tab in the worktree.
+  var surfaceCount: @MainActor @Sendable (Worktree.ID) -> Int
   var latestUnreadNotification: @MainActor @Sendable () -> NotificationLocation?
   var markNotificationRead: @MainActor @Sendable (Worktree.ID, UUID) -> Void
   /// Blocking scripts (setup / archive / delete / run) bypass zmx and die
@@ -121,6 +125,8 @@ extension TerminalClient: DependencyKey {
     tabID: { _, _ in fatalError("TerminalClient.tabID not configured") },
     selectedTabID: { _ in fatalError("TerminalClient.selectedTabID not configured") },
     selectedSurfaceID: { _ in fatalError("TerminalClient.selectedSurfaceID not configured") },
+    focusedSurfacePWD: { _ in fatalError("TerminalClient.focusedSurfacePWD not configured") },
+    surfaceCount: { _ in fatalError("TerminalClient.surfaceCount not configured") },
     latestUnreadNotification: { fatalError("TerminalClient.latestUnreadNotification not configured") },
     markNotificationRead: { _, _ in fatalError("TerminalClient.markNotificationRead not configured") },
     hasInflightBlockingScripts: { fatalError("TerminalClient.hasInflightBlockingScripts not configured") },
@@ -138,6 +144,8 @@ extension TerminalClient: DependencyKey {
     tabID: unimplemented("TerminalClient.tabID", placeholder: nil),
     selectedTabID: unimplemented("TerminalClient.selectedTabID", placeholder: nil),
     selectedSurfaceID: unimplemented("TerminalClient.selectedSurfaceID", placeholder: nil),
+    focusedSurfacePWD: unimplemented("TerminalClient.focusedSurfacePWD", placeholder: nil),
+    surfaceCount: unimplemented("TerminalClient.surfaceCount", placeholder: 0),
     latestUnreadNotification: unimplemented("TerminalClient.latestUnreadNotification", placeholder: nil),
     markNotificationRead: unimplemented("TerminalClient.markNotificationRead"),
     hasInflightBlockingScripts: unimplemented("TerminalClient.hasInflightBlockingScripts", placeholder: false),

@@ -496,6 +496,9 @@ final class WorktreeInfoWatcherManager {
       return
     }
     emit(.repositoryPullRequestRefresh(repositoryRootURL: repositoryRootURL, worktreeIDs: worktreeIDs))
+    if let selectedWorktreeID, worktreeIDs.contains(selectedWorktreeID) {
+      emit(.focusedPaneRecheckRequested(worktreeID: selectedWorktreeID))
+    }
   }
 
   private func updateLineChangeSchedule(

@@ -19,6 +19,9 @@ private enum CancelID {
   static func delayedPRRefresh(_ worktreeID: Worktree.ID) -> String {
     "repositories.delayedPRRefresh.\(worktreeID)"
   }
+  static func focusedPaneOverride(_ worktreeID: Worktree.ID) -> String {
+    "repositories.focusedPaneOverride.\(worktreeID)"
+  }
 }
 
 nonisolated let repositoriesLogger = SupaLogger("Repositories")
@@ -141,6 +144,18 @@ struct RepositoriesFeature {
     var githubIntegrationAvailability: GithubIntegrationAvailability = .unknown
     var pendingPullRequestRefreshByRepositoryID: [Repository.ID: PendingPullRequestRefresh] = [:]
     var inFlightPullRequestRefreshRepositoryIDs: Set<Repository.ID> = []
+    /// When a worktree has more than one pane open and the currently focused
+    /// pane's shell has navigated (via `cd`) into a different git repo than
+    /// the worktree's own, this holds that pane's resolved repo + PR so the
+    /// side panel can show it instead of the worktree's nominal PR. `nil`
+    /// when the focused pane is still "home" or the worktree has only one pane.
+    struct FocusedPaneOverride: Equatable {
+      let worktreeID: Worktree.ID
+      let surfaceID: UUID
+      let repositoryRootURL: URL
+      var pullRequest: GithubPullRequest?
+    }
+    var focusedPaneOverride: FocusedPaneOverride?
     /// Branch snapshot per worktree at query-start time; consumed when the result lands
     /// so `pullRequestChanged.branchAtQueryTime` matches the branch the watermark armed.
     var inFlightPullRequestBranchSnapshotsByRepositoryID: [Repository.ID: [Worktree.ID: String]] = [:]
@@ -453,6 +468,16 @@ struct RepositoriesFeature {
     case toggleInspectorPane(WorktreeInspectorPane)
     case setInspectorPresented(Bool)
     case delayedPullRequestRefresh(Worktree.ID)
+    /// A terminal pane gained focus. Re-resolves the focused-pane PR override
+    /// (see `State.FocusedPaneOverride`) for the worktree it belongs to.
+    case focusedSurfaceChanged(worktreeID: Worktree.ID, surfaceID: UUID)
+    case focusedPaneOverrideResolved(
+      worktreeID: Worktree.ID,
+      surfaceID: UUID,
+      repositoryRootURL: URL,
+      pullRequest: GithubPullRequest?
+    )
+    case focusedPaneOverrideCleared(worktreeID: Worktree.ID, surfaceID: UUID)
     case openRepositorySettings(Repository.ID)
     case requestCustomizeRepository(Repository.ID)
     case requestCustomizeWorktree(Worktree.ID, Repository.ID)
@@ -530,6 +555,7 @@ struct RepositoriesFeature {
   @Dependency(GithubIntegrationClient.self) private var githubIntegration
   @Dependency(RepositoryPersistenceClient.self) private var repositoryPersistence
   @Dependency(ShellClient.self) private var shellClient
+  @Dependency(TerminalClient.self) private var terminalClient
   @Dependency(\.date.now) private var now
   @Dependency(\.uuid) private var uuid
 
@@ -2213,6 +2239,31 @@ struct RepositoriesFeature {
         }
         return .merge(effects)
 
+      case .focusedSurfaceChanged(let worktreeID, let surfaceID):
+        guard let worktree = state.worktree(for: worktreeID) else { return .none }
+        return resolveFocusedPaneOverride(worktreeID: worktreeID, surfaceID: surfaceID, worktree: worktree)
+
+      case .focusedPaneOverrideResolved(let worktreeID, let surfaceID, let repositoryRootURL, let pullRequest):
+        // The focused pane may have changed again while this was in flight;
+        // only apply a result that still matches the currently focused surface.
+        guard terminalClient.selectedSurfaceID(worktreeID) == surfaceID else { return .none }
+        state.focusedPaneOverride = State.FocusedPaneOverride(
+          worktreeID: worktreeID,
+          surfaceID: surfaceID,
+          repositoryRootURL: repositoryRootURL,
+          pullRequest: pullRequest
+        )
+        return .none
+
+      case .focusedPaneOverrideCleared(let worktreeID, let surfaceID):
+        // A clear from a resolution for a surface that's since lost focus
+        // must not wipe out a newer override set for the surface now focused.
+        guard terminalClient.selectedSurfaceID(worktreeID) == surfaceID else { return .none }
+        if state.focusedPaneOverride?.worktreeID == worktreeID {
+          state.focusedPaneOverride = nil
+        }
+        return .none
+
       case .pullRequestAction(let worktreeID, let action):
         guard let worktree = state.worktree(for: worktreeID),
           let repositoryID = state.repositoryID(containing: worktreeID),
@@ -2928,6 +2979,13 @@ struct RepositoriesFeature {
           case .disabled:
             return .none
           }
+        case .focusedPaneRecheckRequested(let worktreeID):
+          guard let worktree = state.worktree(for: worktreeID),
+            let surfaceID = terminalClient.selectedSurfaceID(worktreeID)
+          else {
+            return .none
+          }
+          return resolveFocusedPaneOverride(worktreeID: worktreeID, surfaceID: surfaceID, worktree: worktree)
         }
       default:
         return .none
@@ -4086,6 +4144,62 @@ struct RepositoriesFeature {
       state.applyCacheRecomputes(action.cacheInvalidations)
       return .none
     }
+  }
+
+  /// Resolves the PR override for the worktree's currently focused pane (see
+  /// `State.FocusedPaneOverride`). No-ops (clearing any existing override)
+  /// unless the worktree has more than one pane open and the focused pane's
+  /// live cwd resolves to a different repo than the worktree's own.
+  private func resolveFocusedPaneOverride(
+    worktreeID: Worktree.ID,
+    surfaceID: UUID,
+    worktree: Worktree
+  ) -> Effect<Action> {
+    guard terminalClient.surfaceCount(worktreeID) > 1,
+      let pwd = terminalClient.focusedSurfacePWD(worktreeID)
+    else {
+      return .send(.focusedPaneOverrideCleared(worktreeID: worktreeID, surfaceID: surfaceID))
+    }
+    let gitClient = gitClient(for: worktree)
+    let githubCLI = githubCLI
+    let ownRootPath = worktree.repositoryRootURL.standardizedFileURL.path(percentEncoded: false)
+    return .run { send in
+      guard let repoRoot = try? await gitClient.repoRoot(URL(fileURLWithPath: pwd)) else {
+        await send(.focusedPaneOverrideCleared(worktreeID: worktreeID, surfaceID: surfaceID))
+        return
+      }
+      guard repoRoot.standardizedFileURL.path(percentEncoded: false) != ownRootPath else {
+        // Focused pane is still "home" — show the worktree's own PR.
+        await send(.focusedPaneOverrideCleared(worktreeID: worktreeID, surfaceID: surfaceID))
+        return
+      }
+      guard
+        let remoteInfo = await resolveRemoteInfo(
+          repositoryRootURL: repoRoot,
+          githubCLI: githubCLI,
+          gitClient: gitClient
+        ),
+        let branch = await gitClient.branchName(repoRoot)
+      else {
+        await send(.focusedPaneOverrideCleared(worktreeID: worktreeID, surfaceID: surfaceID))
+        return
+      }
+      let prsByBranch = try? await githubCLI.batchPullRequests(
+        remoteInfo.host,
+        remoteInfo.owner,
+        remoteInfo.repo,
+        [branch]
+      )
+      await send(
+        .focusedPaneOverrideResolved(
+          worktreeID: worktreeID,
+          surfaceID: surfaceID,
+          repositoryRootURL: repoRoot,
+          pullRequest: prsByBranch?[branch] ?? nil
+        )
+      )
+    }
+    .cancellable(id: CancelID.focusedPaneOverride(worktreeID), cancelInFlight: true)
   }
 
   private func refreshRepositoryPullRequests(

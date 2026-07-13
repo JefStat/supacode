@@ -2061,6 +2061,16 @@ final class WorktreeTerminalState {
     return trees[tabId]?.visibleLeaves().first?.id
   }
 
+  /// Live cwd (OSC 7) of the currently focused surface in the selected tab, if any.
+  func focusedSurfacePWD() -> String? {
+    currentFocusedSurfaceId().flatMap { surfaces[$0]?.bridge.state.pwd }
+  }
+
+  /// Total number of panes (leaves) open across every tab in this worktree.
+  func surfaceCount() -> Int {
+    allSurfaceIDs.count
+  }
+
   /// Appends a notification from a custom (hook / OSC 3008) source. Records the
   /// time so the agent's own OSC 9 for the same event is deduped, and cancels any
   /// OSC 9 currently held for this surface (the expanded one supersedes it).

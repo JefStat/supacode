@@ -16,6 +16,10 @@ struct WorktreeInfoWatcherClient {
     case branchChanged(worktreeID: Worktree.ID)
     case filesChanged(worktreeID: Worktree.ID)
     case repositoryPullRequestRefresh(repositoryRootURL: URL, worktreeIDs: [Worktree.ID])
+    /// Fired on the same cadence as `repositoryPullRequestRefresh`, but only for
+    /// the currently selected worktree — catches an in-place `cd` in an
+    /// already-focused pane, which doesn't emit a terminal focus-change event.
+    case focusedPaneRecheckRequested(worktreeID: Worktree.ID)
   }
 }
 

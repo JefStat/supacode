@@ -59,7 +59,8 @@ struct WorktreeDetailView: View {
     let inspectorPresented = repositories.inspectorPresented
     let inspectorPullRequest = Self.inspectorPullRequest(
       selectedWorktree: selectedWorktree,
-      selectedRow: selectedRow
+      selectedRow: selectedRow,
+      repositories: repositories
     )
     let isCheckingPullRequest = Self.isCheckingPullRequest(
       selectedWorktree: selectedWorktree,
@@ -140,12 +141,18 @@ struct WorktreeDetailView: View {
   }
 
   /// The selected worktree's pull request, shown in the inspector's git pane.
+  /// Prefers the focused pane's PR override (see `RepositoriesFeature.State.FocusedPaneOverride`)
+  /// when the worktree has multiple panes open and the focused one has navigated
+  /// into a different repo than the worktree's own.
   private static func inspectorPullRequest(
     selectedWorktree: Worktree?,
-    selectedRow: SelectedWorktreeSlice?
+    selectedRow: SelectedWorktreeSlice?,
+    repositories: RepositoriesFeature.State
   ) -> GithubPullRequest? {
     selectedWorktree.flatMap { worktree in
-      if case .git(let pullRequest) = toolbarKind(for: worktree, selectedRow: selectedRow) {
+      if case .git(let pullRequest) = toolbarKind(
+        for: worktree, selectedRow: selectedRow, repositories: repositories
+      ) {
         return pullRequest
       }
       return nil
@@ -550,7 +557,8 @@ struct WorktreeDetailView: View {
           TrailingStatusToolbarContent(
             pullRequest: WorktreeDetailView.inspectorPullRequest(
               selectedWorktree: selectedWorktree,
-              selectedRow: selectedRow
+              selectedRow: selectedRow,
+              repositories: repositories
             ),
             repositoriesStore: repositoriesStore,
             terminalManager: terminalManager,
@@ -571,7 +579,9 @@ struct WorktreeDetailView: View {
         let toolbarState = WorktreeToolbarState(
           titleContent: titleContent,
           rootURL: selectedWorktree.repositoryRootURL,
-          kind: WorktreeDetailView.toolbarKind(for: selectedWorktree, selectedRow: selectedRow),
+          kind: WorktreeDetailView.toolbarKind(
+            for: selectedWorktree, selectedRow: selectedRow, repositories: repositories
+          ),
           remoteOpenHost: selectedWorktree.host,
           remoteOpenPath: selectedWorktree.location.workingDirectoryPath,
           openActionSelection: store.openActionSelection,
@@ -828,9 +838,15 @@ struct WorktreeDetailView: View {
 
   fileprivate static func toolbarKind(
     for selectedWorktree: Worktree,
-    selectedRow: SelectedWorktreeSlice?
+    selectedRow: SelectedWorktreeSlice?,
+    repositories: RepositoriesFeature.State
   ) -> WorktreeToolbarState.Kind {
     guard selectedRow?.isFolder != true else { return .folder }
+    if let override = repositories.focusedPaneOverride,
+      override.worktreeID == selectedWorktree.id
+    {
+      return .git(pullRequest: override.pullRequest)
+    }
     guard let pullRequest = selectedRow?.pullRequest else {
       return .git(pullRequest: nil)
     }

@@ -1437,6 +1437,9 @@ struct AppFeature {
       case .terminalEvent(.agentHookEventReceived(let event)):
         return .send(.agentPresence(.hookEventReceived(event)))
 
+      case .terminalEvent(.focusChanged(let worktreeID, let surfaceID)):
+        return .send(.repositories(.focusedSurfaceChanged(worktreeID: worktreeID, surfaceID: surfaceID)))
+
       case .terminalEvent:
         return .none
       }
