@@ -1661,6 +1661,75 @@ struct CommandPaletteFeatureTests {
     // The activation delegate carries the focus — no dismissal echo.
     await store.receive(\.delegate.openSettings)
   }
+
+  @Test func filterItems_commandsPrependsGithubRepoURLItem() {
+    let openSettings = CommandPaletteItem(
+      id: "global.open-settings", title: "Open Settings", subtitle: nil, kind: .openSettings
+    )
+    let result = CommandPaletteFeature.filterItems(
+      items: [openSettings],
+      query: "https://github.com/a/b"
+    )
+    #expect(result.first?.id == "github-url.open")
+    #expect(result.first?.kind == .openGithubURL(.repo(host: "github.com", owner: "a", repo: "b")))
+  }
+
+  @Test func filterItems_worktreeSwitcherPrependsGithubRepoURLItem() {
+    let worktree = CommandPaletteItem(
+      id: "worktree.a.select", title: "a", subtitle: "R", kind: .worktreeSelect("a")
+    )
+    let result = CommandPaletteFeature.filterItems(
+      items: [worktree],
+      query: "https://github.com/a/b",
+      mode: .worktreeSwitcher
+    )
+    #expect(result.first?.id == "github-url.open")
+    #expect(result.first?.kind == .openGithubURL(.repo(host: "github.com", owner: "a", repo: "b")))
+  }
+
+  @Test func filterItems_githubPullRequestURLTitleIncludesNumber() {
+    let result = CommandPaletteFeature.filterItems(
+      items: [],
+      query: "https://github.com/a/b/pull/7"
+    )
+    #expect(result.first?.title.contains("PR #7") == true)
+    #expect(
+      result.first?.kind == .openGithubURL(.pullRequest(host: "github.com", owner: "a", repo: "b", number: 7))
+    )
+  }
+
+  @Test func filterItems_nonGithubQueryHasNoGithubURLItem() {
+    let openSettings = CommandPaletteItem(
+      id: "global.open-settings", title: "Open Settings", subtitle: nil, kind: .openSettings
+    )
+    let result = CommandPaletteFeature.filterItems(items: [openSettings], query: "random text")
+    #expect(!result.contains { $0.id == "github-url.open" })
+  }
+
+  @Test func activateGithubURLItemDispatchesDelegate() async {
+    let now = Date(timeIntervalSince1970: 42)
+    let githubURL = GithubURL.repo(host: "github.com", owner: "a", repo: "b")
+    let item = CommandPaletteItem(
+      id: "github-url.open",
+      title: "Open a/b",
+      subtitle: "Switch to it if open, otherwise clone",
+      kind: .openGithubURL(githubURL)
+    )
+    var state = CommandPaletteFeature.State()
+    state.isPresented = true
+    let store = TestStore(initialState: state) {
+      CommandPaletteFeature()
+    }
+    store.dependencies.date = .constant(now)
+
+    await store.send(.activateItem(item)) {
+      $0.isPresented = false
+      $0.query = ""
+      $0.selectedIndex = nil
+      $0.recencyByItemID[item.id] = now.timeIntervalSince1970
+    }
+    await store.receive(.delegate(.openGithubURL(githubURL)))
+  }
 }
 
 private func makeWorktree(

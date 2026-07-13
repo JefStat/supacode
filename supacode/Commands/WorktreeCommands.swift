@@ -211,7 +211,7 @@ private struct WorktreeFileMenu: Commands {
         .help("Add a repository or folder on an SSH host (\(addRemoteRepo?.display ?? "none"))")
         Divider()
         Button("Clone Repository...", systemImage: "square.and.arrow.down.on.square") {
-          store.send(.repositories(.requestCloneRepository))
+          store.send(.repositories(.requestCloneRepository(prefillURL: nil)))
         }
         .appKeyboardShortcut(cloneRepo)
         .help("Clone a remote repository into a local folder (\(cloneRepo?.display ?? "none"))")

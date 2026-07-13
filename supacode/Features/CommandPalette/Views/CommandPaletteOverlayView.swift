@@ -270,7 +270,7 @@ private struct CommandPaletteRowView: View {
       .ghosttyCommand,
       .openPullRequest, .markPullRequestReady, .mergePullRequest, .closePullRequest, .copyFailingJobURL,
       .copyCiFailureLogs,
-      .rerunFailedJobs, .openFailingCheckDetails, .worktreeSelect:
+      .rerunFailedJobs, .openFailingCheckDetails, .worktreeSelect, .openGithubURL:
       return nil
     case .removeWorktree:
       return "Remove"
@@ -325,6 +325,8 @@ private struct CommandPaletteRowView: View {
       return "exclamationmark.triangle"
     case .worktreeSelect:
       return nil
+    case .openGithubURL:
+      return "link"
     case .removeWorktree:
       return "trash"
     case .archiveWorktree:
@@ -357,6 +359,8 @@ private struct CommandPaletteRowView: View {
     case .renameBranch:
       return true
     case .runScript, .stopScript:
+      return true
+    case .openGithubURL:
       return true
     #if DEBUG
       case .debugTestToast:
@@ -508,6 +512,8 @@ private struct CommandPaletteRowView: View {
       base = "Run \(definition.name)"
     case .stopScript(_, let name):
       base = "Stop \(name)"
+    case .openGithubURL:
+      base = row.title
     #if DEBUG
       case .debugTestToast:
         base = row.title

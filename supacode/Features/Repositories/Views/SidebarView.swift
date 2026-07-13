@@ -53,7 +53,7 @@ struct SidebarView: View {
           .help("Add a repository or folder on an SSH host")
           Divider()
           Button {
-            store.send(.requestCloneRepository)
+            store.send(.requestCloneRepository(prefillURL: nil))
           } label: {
             Label("Clone Repository…", systemImage: "square.and.arrow.down.on.square")
           }

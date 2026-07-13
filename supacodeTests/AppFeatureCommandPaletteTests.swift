@@ -581,6 +581,314 @@ struct AppFeatureCommandPaletteTests {
     #expect(store.state.commandPalette.isPresented == true)
   }
 
+  // MARK: - GitHub URL navigation
+
+  @Test(.dependencies) func openGithubURLRepoOpenSelectsRepositoryMRUWorktree() async {
+    let mainWorktree = makeWorktree(id: "/tmp/repo-gh/main", name: "main", repoRoot: "/tmp/repo-gh")
+    let recentWorktree = makeWorktree(id: "/tmp/repo-gh/wt-2", name: "feat/y", repoRoot: "/tmp/repo-gh")
+    let repository = makeRepository(id: "/tmp/repo-gh", worktrees: [mainWorktree, recentWorktree])
+    var repositoriesState = RepositoriesFeature.State()
+    repositoriesState.repositories = [repository]
+    repositoriesState.repositoryRoots = [repository.rootURL]
+    repositoriesState.worktreeMRU = [recentWorktree.id]
+    repositoriesState.reconcileSidebarForTesting()
+    let store = TestStore(
+      initialState: AppFeature.State(repositories: repositoriesState, settings: SettingsFeature.State())
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.gitClient.remoteInfo = { _ in GithubRemoteInfo(host: "github.com", owner: "a", repo: "b") }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .commandPalette(.delegate(.openGithubURL(.repo(host: "github.com", owner: "a", repo: "b")))))
+    await store.receive(\.githubURLRepositoryMatched)
+    await store.receive(\.repositories.selectWorktree)
+    #expect(store.state.repositories.selection == .worktree(recentWorktree.id))
+  }
+
+  @Test(.dependencies) func openGithubURLRepoNotOpenShowsPrefilledCloneForm() async {
+    let url = GithubURL.repo(host: "github.com", owner: "a", repo: "b")
+    let store = TestStore(
+      initialState: AppFeature.State(
+        repositories: RepositoriesFeature.State(),
+        settings: SettingsFeature.State()
+      )
+    ) {
+      AppFeature()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.commandPalette(.delegate(.openGithubURL(url))))
+    await store.receive(\.githubURLRepositoryMatched) {
+      $0.pendingGithubNavigation = url
+    }
+    await store.receive(\.repositories.requestCloneRepository)
+    #expect(
+      store.state.repositories.cloneRepositoryForm?.repositoryURL == "https://github.com/a/b.git")
+  }
+
+  @Test(.dependencies) func openGithubPRWithExistingWorktreeSelectsIt() async {
+    let mainWorktree = makeWorktree(id: "/tmp/repo-gh/main", name: "main", repoRoot: "/tmp/repo-gh")
+    let prWorktree = makeWorktree(id: "/tmp/repo-gh/wt-pr", name: "feat/x", repoRoot: "/tmp/repo-gh")
+    let repository = makeRepository(id: "/tmp/repo-gh", worktrees: [mainWorktree, prWorktree])
+    var repositoriesState = RepositoriesFeature.State()
+    repositoriesState.repositories = [repository]
+    repositoriesState.repositoryRoots = [repository.rootURL]
+    repositoriesState.reconcileSidebarForTesting()
+    let store = TestStore(
+      initialState: AppFeature.State(repositories: repositoriesState, settings: SettingsFeature.State())
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.gitClient.remoteInfo = { _ in GithubRemoteInfo(host: "github.com", owner: "a", repo: "b") }
+      $0.githubCLI.pullRequestDetails = { _, _, _, _ in
+        GithubPullRequestDetails(
+          number: 7,
+          title: "PR title",
+          state: "OPEN",
+          headRefName: "feat/x",
+          isCrossRepository: false,
+          headRepositoryOwner: .init(login: "a")
+        )
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .commandPalette(
+        .delegate(.openGithubURL(.pullRequest(host: "github.com", owner: "a", repo: "b", number: 7)))))
+    await store.receive(\.githubURLRepositoryMatched)
+    await store.receive(\.githubPullRequestDetailsLoaded)
+    await store.receive(\.repositories.selectWorktree)
+    #expect(store.state.repositories.selection == .worktree(prWorktree.id))
+  }
+
+  @Test(.dependencies) func openGithubPRWithoutWorktreeCreatesWorktreeOnHeadBranch() async {
+    let mainWorktree = makeWorktree(id: "/tmp/repo-gh/main", name: "main", repoRoot: "/tmp/repo-gh")
+    let repository = makeRepository(id: "/tmp/repo-gh", worktrees: [mainWorktree])
+    var repositoriesState = RepositoriesFeature.State()
+    repositoriesState.repositories = [repository]
+    repositoriesState.repositoryRoots = [repository.rootURL]
+    repositoriesState.reconcileSidebarForTesting()
+    let store = TestStore(
+      initialState: AppFeature.State(repositories: repositoriesState, settings: SettingsFeature.State())
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.uuid = .incrementing
+      $0.gitClient.remoteInfo = { _ in GithubRemoteInfo(host: "github.com", owner: "a", repo: "b") }
+      $0.githubCLI.pullRequestDetails = { _, _, _, _ in
+        GithubPullRequestDetails(
+          number: 7,
+          title: "PR title",
+          state: "OPEN",
+          headRefName: "feat/x",
+          isCrossRepository: false,
+          headRepositoryOwner: .init(login: "a")
+        )
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .commandPalette(
+        .delegate(.openGithubURL(.pullRequest(host: "github.com", owner: "a", repo: "b", number: 7)))))
+    await store.receive(\.githubURLRepositoryMatched)
+    await store.receive(\.githubPullRequestDetailsLoaded)
+    await store.receive(\.repositories.createWorktreeInRepository)
+    await store.finish()
+  }
+
+  @Test(.dependencies) func openGithubForkPRShowsUnsupportedAlert() async {
+    let mainWorktree = makeWorktree(id: "/tmp/repo-gh/main", name: "main", repoRoot: "/tmp/repo-gh")
+    let repository = makeRepository(id: "/tmp/repo-gh", worktrees: [mainWorktree])
+    var repositoriesState = RepositoriesFeature.State()
+    repositoriesState.repositories = [repository]
+    repositoriesState.repositoryRoots = [repository.rootURL]
+    repositoriesState.reconcileSidebarForTesting()
+    let store = TestStore(
+      initialState: AppFeature.State(repositories: repositoriesState, settings: SettingsFeature.State())
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.gitClient.remoteInfo = { _ in GithubRemoteInfo(host: "github.com", owner: "a", repo: "b") }
+      $0.githubCLI.pullRequestDetails = { _, _, _, _ in
+        GithubPullRequestDetails(
+          number: 7,
+          title: "PR title",
+          state: "OPEN",
+          headRefName: "feat/x",
+          isCrossRepository: true,
+          headRepositoryOwner: .init(login: "someone-else")
+        )
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .commandPalette(
+        .delegate(.openGithubURL(.pullRequest(host: "github.com", owner: "a", repo: "b", number: 7)))))
+    await store.receive(\.githubPullRequestDetailsLoaded)
+    #expect(store.state.alert != nil)
+    #expect(store.state.repositories.selection == nil)
+  }
+
+  @Test(.dependencies) func openGithubPRDetailsFailureShowsAlert() async {
+    struct DetailsError: Error {}
+    let mainWorktree = makeWorktree(id: "/tmp/repo-gh/main", name: "main", repoRoot: "/tmp/repo-gh")
+    let repository = makeRepository(id: "/tmp/repo-gh", worktrees: [mainWorktree])
+    var repositoriesState = RepositoriesFeature.State()
+    repositoriesState.repositories = [repository]
+    repositoriesState.repositoryRoots = [repository.rootURL]
+    repositoriesState.reconcileSidebarForTesting()
+    let store = TestStore(
+      initialState: AppFeature.State(repositories: repositoriesState, settings: SettingsFeature.State())
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.gitClient.remoteInfo = { _ in GithubRemoteInfo(host: "github.com", owner: "a", repo: "b") }
+      $0.githubCLI.pullRequestDetails = { _, _, _, _ in throw DetailsError() }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .commandPalette(
+        .delegate(.openGithubURL(.pullRequest(host: "github.com", owner: "a", repo: "b", number: 7)))))
+    await store.receive(\.githubPullRequestDetailsLoaded)
+    #expect(store.state.alert != nil)
+  }
+
+  @Test(.dependencies) func pendingGithubNavigationResumesAfterOpenRepositoriesFinished() async {
+    let prWorktree = makeWorktree(id: "/tmp/repo-gh/wt-pr", name: "feat/x", repoRoot: "/tmp/repo-gh")
+    let repository = makeRepository(id: "/tmp/repo-gh", worktrees: [prWorktree])
+    // The repo arrives ONLY via the openRepositoriesFinished payload, mirroring
+    // production where the core reducer runs before the repositories child has
+    // applied the freshly cloned roster.
+    var appState = AppFeature.State(
+      repositories: RepositoriesFeature.State(), settings: SettingsFeature.State())
+    appState.pendingGithubNavigation = .pullRequest(host: "github.com", owner: "a", repo: "b", number: 7)
+    let store = TestStore(initialState: appState) {
+      AppFeature()
+    } withDependencies: {
+      $0.gitClient.remoteInfo = { _ in GithubRemoteInfo(host: "github.com", owner: "a", repo: "b") }
+      $0.githubCLI.pullRequestDetails = { _, _, _, _ in
+        GithubPullRequestDetails(
+          number: 7,
+          title: "PR title",
+          state: "OPEN",
+          headRefName: "feat/x",
+          isCrossRepository: false,
+          headRepositoryOwner: .init(login: "a")
+        )
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .repositories(
+        .openRepositoriesFinished(
+          [repository], failures: [], invalidRoots: [], roots: [repository.rootURL]))
+    ) {
+      $0.pendingGithubNavigation = nil
+    }
+    await store.receive(\.resumeGithubNavigation)
+    await store.receive(\.githubURLRepositoryMatched)
+    await store.receive(\.githubPullRequestDetailsLoaded)
+    await store.receive(\.repositories.selectWorktree)
+    #expect(store.state.repositories.selection == .worktree(prWorktree.id))
+  }
+
+  @Test(.dependencies) func pendingGithubNavigationSurvivesUnrelatedOpenWhileCloneFormPresented() async {
+    let otherRepository = makeRepository(id: "/tmp/repo-other", worktrees: [])
+    var repositoriesState = RepositoriesFeature.State()
+    repositoriesState.cloneRepositoryForm = CloneRepositoryFormFeature.State(
+      repositoryURL: "https://github.com/a/b.git",
+      cloneLocationPath: "/tmp"
+    )
+    var appState = AppFeature.State(repositories: repositoriesState, settings: SettingsFeature.State())
+    appState.pendingGithubNavigation = .repo(host: "github.com", owner: "a", repo: "b")
+    let store = TestStore(initialState: appState) {
+      AppFeature()
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .repositories(
+        .openRepositoriesFinished(
+          [otherRepository], failures: [], invalidRoots: [], roots: [otherRepository.rootURL]))
+    )
+    #expect(
+      store.state.pendingGithubNavigation == .repo(host: "github.com", owner: "a", repo: "b"))
+  }
+
+  @Test(.dependencies) func openGithubMergedPRWithoutWorktreeShowsAlert() async {
+    let mainWorktree = makeWorktree(id: "/tmp/repo-gh/main", name: "main", repoRoot: "/tmp/repo-gh")
+    let repository = makeRepository(id: "/tmp/repo-gh", worktrees: [mainWorktree])
+    var repositoriesState = RepositoriesFeature.State()
+    repositoriesState.repositories = [repository]
+    repositoriesState.repositoryRoots = [repository.rootURL]
+    repositoriesState.reconcileSidebarForTesting()
+    let store = TestStore(
+      initialState: AppFeature.State(repositories: repositoriesState, settings: SettingsFeature.State())
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.gitClient.remoteInfo = { _ in GithubRemoteInfo(host: "github.com", owner: "a", repo: "b") }
+      $0.githubCLI.pullRequestDetails = { _, _, _, _ in
+        GithubPullRequestDetails(
+          number: 7,
+          title: "PR title",
+          state: "MERGED",
+          headRefName: "feat/x",
+          isCrossRepository: false,
+          headRepositoryOwner: .init(login: "a")
+        )
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .commandPalette(
+        .delegate(.openGithubURL(.pullRequest(host: "github.com", owner: "a", repo: "b", number: 7)))))
+    await store.receive(\.githubPullRequestDetailsLoaded)
+    #expect(store.state.alert != nil)
+    #expect(store.state.repositories.selection == nil)
+  }
+
+  @Test(.dependencies) func pendingGithubNavigationDoesNotResumeOnRepositoriesLoaded() async {
+    var appState = AppFeature.State(
+      repositories: RepositoriesFeature.State(), settings: SettingsFeature.State())
+    appState.pendingGithubNavigation = .repo(host: "github.com", owner: "a", repo: "b")
+    let store = TestStore(initialState: appState) {
+      AppFeature()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.repositories(.repositoriesLoaded([], failures: [], roots: [], animated: false)))
+    #expect(
+      store.state.pendingGithubNavigation == .repo(host: "github.com", owner: "a", repo: "b"))
+  }
+
+  @Test(.dependencies) func cloneFormCancelClearsPendingGithubNavigation() async {
+    var repositoriesState = RepositoriesFeature.State()
+    repositoriesState.cloneRepositoryForm = CloneRepositoryFormFeature.State(
+      repositoryURL: "https://github.com/a/b.git",
+      cloneLocationPath: "/tmp"
+    )
+    var appState = AppFeature.State(repositories: repositoriesState, settings: SettingsFeature.State())
+    appState.pendingGithubNavigation = .repo(host: "github.com", owner: "a", repo: "b")
+    let store = TestStore(initialState: appState) {
+      AppFeature()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.repositories(.cloneRepositoryForm(.presented(.delegate(.cancel))))) {
+      $0.repositories.cloneRepositoryForm = nil
+      $0.pendingGithubNavigation = nil
+    }
+  }
 }
 
 private func makeWorktree(id: String, name: String, repoRoot: String = "/tmp/repo") -> Worktree {

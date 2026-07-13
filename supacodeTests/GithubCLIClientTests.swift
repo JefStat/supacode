@@ -511,6 +511,87 @@ struct GithubCLIClientTests {
     #expect(recordedArguments.value == [["pr", "ready", "13", "--repo", "github.com/owner/repo"]])
   }
 
+  @Test func pullRequestDetailsSendsExpectedArguments() async throws {
+    let recordedArguments = LockIsolated<[[String]]>([])
+    let shell = ShellClient(
+      run: { executableURL, _, _ in
+        if executableURL.lastPathComponent == "which" {
+          return ShellOutput(stdout: "/usr/bin/gh", stderr: "", exitCode: 0)
+        }
+        return ShellOutput(stdout: "", stderr: "", exitCode: 0)
+      },
+      runLoginImpl: { executableURL, arguments, _, _ in
+        guard executableURL.lastPathComponent == "gh" else {
+          return ShellOutput(stdout: "", stderr: "", exitCode: 0)
+        }
+        recordedArguments.withValue { $0.append(arguments) }
+        let stdout = """
+          {"number":42,"title":"Add feature","state":"OPEN","headRefName":"feature-branch",\
+          "isCrossRepository":false,"headRepositoryOwner":{"login":"khoi"}}
+          """
+        return ShellOutput(stdout: stdout, stderr: "", exitCode: 0)
+      }
+    )
+    let client = GithubCLIClient.live(shell: shell)
+
+    _ = try await client.pullRequestDetails("github.com", "khoi", "repo", 42)
+
+    #expect(
+      recordedArguments.value == [
+        [
+          "pr", "view", "42", "--repo", "github.com/khoi/repo", "--json",
+          "number,title,state,headRefName,isCrossRepository,headRepositoryOwner",
+        ]
+      ]
+    )
+  }
+
+  @Test func pullRequestDetailsDecodesSameRepoPullRequest() async throws {
+    let stdout = """
+      {"number":42,"title":"Add feature","state":"OPEN","headRefName":"feature-branch",\
+      "isCrossRepository":false,"headRepositoryOwner":{"login":"khoi"}}
+      """
+    let client = GithubCLIClient.live(shell: Self.ghShell(stdout: stdout))
+
+    let details = try await client.pullRequestDetails("github.com", "khoi", "repo", 42)
+
+    #expect(
+      details == GithubPullRequestDetails(
+        number: 42,
+        title: "Add feature",
+        state: "OPEN",
+        headRefName: "feature-branch",
+        isCrossRepository: false,
+        headRepositoryOwner: GithubPullRequestDetails.Owner(login: "khoi")
+      )
+    )
+  }
+
+  @Test func pullRequestDetailsDecodesCrossRepositoryPullRequest() async throws {
+    let stdout = """
+      {"number":7,"title":"Fork contribution","state":"OPEN","headRefName":"fix-typo",\
+      "isCrossRepository":true,"headRepositoryOwner":{"login":"contributor"}}
+      """
+    let client = GithubCLIClient.live(shell: Self.ghShell(stdout: stdout))
+
+    let details = try await client.pullRequestDetails("github.com", "khoi", "repo", 7)
+
+    #expect(details.isCrossRepository)
+    #expect(details.headRepositoryOwner == GithubPullRequestDetails.Owner(login: "contributor"))
+  }
+
+  @Test func pullRequestDetailsDecodesWhenHeadRepositoryOwnerMissing() async throws {
+    let stdout = """
+      {"number":9,"title":"Deleted fork PR","state":"MERGED","headRefName":"old-branch",\
+      "isCrossRepository":true}
+      """
+    let client = GithubCLIClient.live(shell: Self.ghShell(stdout: stdout))
+
+    let details = try await client.pullRequestDetails("github.com", "khoi", "repo", 9)
+
+    #expect(details.headRepositoryOwner == nil)
+  }
+
   @Test func executableResolutionIsSingleFlightAndReused() async {
     let probe = GithubBatchShellProbe()
     let shell = ShellClient(

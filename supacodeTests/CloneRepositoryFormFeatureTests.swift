@@ -173,10 +173,34 @@ struct CloneRepositoryParentWiringTests {
     }
     store.exhaustivity = .off
 
-    await store.send(.requestCloneRepository)
+    await store.send(.requestCloneRepository(prefillURL: nil))
     #expect(store.state.cloneRepositoryForm != nil)
     await store.send(.cloneRepositoryForm(.presented(.delegate(.cancel))))
     #expect(store.state.cloneRepositoryForm == nil)
+  }
+
+  @Test func requestCloneRepositoryWithPrefillURLSeedsRepositoryURL() async {
+    let store = TestStore(initialState: RepositoriesFeature.State()) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+    }
+    store.exhaustivity = .off
+
+    await store.send(.requestCloneRepository(prefillURL: "https://github.com/a/b.git"))
+    #expect(store.state.cloneRepositoryForm?.repositoryURL == "https://github.com/a/b.git")
+  }
+
+  @Test func requestCloneRepositoryWithoutPrefillURLLeavesRepositoryURLEmpty() async {
+    let store = TestStore(initialState: RepositoriesFeature.State()) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+    }
+    store.exhaustivity = .off
+
+    await store.send(.requestCloneRepository(prefillURL: nil))
+    #expect(store.state.cloneRepositoryForm?.repositoryURL == "")
   }
 
   @Test func clonedDelegateDismissesAndOpensClonedDirectory() async {
@@ -192,7 +216,7 @@ struct CloneRepositoryParentWiringTests {
     }
     store.exhaustivity = .off
 
-    await store.send(.requestCloneRepository)
+    await store.send(.requestCloneRepository(prefillURL: nil))
     await store.send(.cloneRepositoryForm(.presented(.delegate(.cloned(directory)))))
     #expect(store.state.cloneRepositoryForm == nil)
     await store.receive(\.openRepositories)
@@ -216,7 +240,7 @@ struct CloneRepositoryParentWiringTests {
     }
     store.exhaustivity = .off
 
-    await store.send(.requestCloneRepository)
+    await store.send(.requestCloneRepository(prefillURL: nil))
     #expect(store.state.cloneRepositoryForm?.cloneLocationPath == "/tmp/known")
     await store.send(.cloneRepositoryForm(.presented(.delegate(.cloned(URL(fileURLWithPath: "/tmp/dest/repo"))))))
     await store.receive(\.openRepositories)
@@ -236,7 +260,7 @@ struct CloneRepositoryParentWiringTests {
     }
     store.exhaustivity = .off
 
-    await store.send(.requestCloneRepository)
+    await store.send(.requestCloneRepository(prefillURL: nil))
     #expect(
       store.state.cloneRepositoryForm?.cloneLocationPath
         == FileManager.default.homeDirectoryForCurrentUser.path(percentEncoded: false)

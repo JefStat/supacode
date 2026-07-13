@@ -8,7 +8,7 @@ extension RepositoriesFeature {
   static var cloneRepositoryFormReducer: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .requestCloneRepository:
+      case .requestCloneRepository(let prefillURL):
         @Shared(.appStorage("lastCloneLocationPath")) var lastCloneLocationPath = ""
         // Seed with the last-used parent so a burst of clones doesn't re-pick the
         // folder each time; fall back to home on first run.
@@ -16,7 +16,10 @@ extension RepositoriesFeature {
           lastCloneLocationPath.isEmpty
           ? FileManager.default.homeDirectoryForCurrentUser.path(percentEncoded: false)
           : lastCloneLocationPath
-        state.cloneRepositoryForm = CloneRepositoryFormFeature.State(cloneLocationPath: seededLocation)
+        state.cloneRepositoryForm = CloneRepositoryFormFeature.State(
+          repositoryURL: prefillURL ?? "",
+          cloneLocationPath: seededLocation
+        )
         return .none
 
       case .cloneRepositoryForm(.presented(.delegate(.cancel))):

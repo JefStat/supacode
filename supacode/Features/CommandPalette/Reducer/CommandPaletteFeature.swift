@@ -74,6 +74,7 @@ struct CommandPaletteFeature {
     case openFailingCheckDetails(Worktree.ID)
     case runScript(ScriptDefinition)
     case stopScript(UUID, name: String)
+    case openGithubURL(GithubURL)
     /// Palette closed without the user activating an item (Esc, outside
     /// tap, programmatic dismiss). AppFeature uses this to refocus the
     /// current worktree's terminal, the "terminal is the default
@@ -229,7 +230,32 @@ struct CommandPaletteFeature {
       }
     }
     let scorer = CommandPaletteFuzzyScorer(query: trimmed, recencyByID: recencyByID, now: now)
-    return scorer.rankedItems(from: items)
+    let ranked = scorer.rankedItems(from: items)
+    guard let githubURLItem = githubURLItem(for: trimmed) else { return ranked }
+    return [githubURLItem] + ranked
+  }
+
+  /// A synthetic row for a pasted GitHub URL, prepended to `filterItems`'
+  /// results in both palette modes so `⌘P`/`⌘⇧P` then Enter can open or clone
+  /// a repo, or check out a PR, straight from a pasted link.
+  static func githubURLItem(for query: String) -> CommandPaletteItem? {
+    guard let githubURL = GithubURL.parse(query) else { return nil }
+    let title: String
+    let subtitle: String
+    switch githubURL {
+    case .repo:
+      title = "Open \(githubURL.displaySlug)"
+      subtitle = "Switch to it if open, otherwise clone"
+    case .pullRequest(_, _, _, let number):
+      title = "Check out PR #\(number)"
+      subtitle = githubURL.displaySlug
+    }
+    return CommandPaletteItem(
+      id: CommandPaletteItemID.githubURLOpen,
+      title: title,
+      subtitle: subtitle,
+      kind: .openGithubURL(githubURL)
+    )
   }
 
   /// The always-present global actions, shown regardless of selection.
@@ -653,6 +679,7 @@ private enum CommandPaletteItemID {
   static let globalNewWorktree = "global.new-worktree"
   static let globalRefreshWorktrees = "global.refresh-worktrees"
   static let globalViewArchivedWorktrees = "global.view-archived-worktrees"
+  static let githubURLOpen = "github-url.open"
 
   static var globalIDs: [CommandPaletteItem.ID] {
     [
@@ -790,6 +817,8 @@ private func delegateAction(for kind: CommandPaletteItem.Kind) -> CommandPalette
     return .refreshWorktrees
   case .ghosttyCommand(let action):
     return .ghosttyCommand(action)
+  case .openGithubURL(let githubURL):
+    return .openGithubURL(githubURL)
   case .openPullRequest,
     .markPullRequestReady,
     .mergePullRequest,
@@ -854,7 +883,8 @@ private func pullRequestDelegateAction(
     .refreshWorktrees,
     .ghosttyCommand,
     .runScript,
-    .stopScript:
+    .stopScript,
+    .openGithubURL:
     return nil
   #if DEBUG
     case .debugTestToast:

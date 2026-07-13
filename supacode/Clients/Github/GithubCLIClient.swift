@@ -183,11 +183,26 @@ enum GithubAuthStatusParsing {
   }
 }
 
+nonisolated struct GithubPullRequestDetails: Decodable, Equatable, Sendable {
+  let number: Int
+  let title: String
+  let state: String
+  let headRefName: String
+  let isCrossRepository: Bool
+  let headRepositoryOwner: Owner?
+
+  nonisolated struct Owner: Decodable, Equatable, Sendable {
+    let login: String
+  }
+}
+
 struct GithubCLIClient: Sendable {
   var defaultBranch: @Sendable (URL) async throws -> String
   var latestRun: @Sendable (URL, String) async throws -> GithubWorkflowRun?
   var resolveRemoteInfo: @Sendable (URL) async -> GithubRemoteInfo?
   var batchPullRequests: @Sendable (String, String, String, [String]) async throws -> [String: GithubPullRequest]
+  var pullRequestDetails: @Sendable (_ host: String, _ owner: String, _ repo: String, _ number: Int) async throws ->
+    GithubPullRequestDetails
   var mergePullRequest: @Sendable (URL, GithubRemoteInfo?, Int, PullRequestMergeStrategy) async throws -> Void
   var closePullRequest: @Sendable (URL, GithubRemoteInfo?, Int) async throws -> Void
   var markPullRequestReady: @Sendable (URL, GithubRemoteInfo?, Int) async throws -> Void
@@ -211,6 +226,7 @@ extension GithubCLIClient: DependencyKey {
       latestRun: latestRunFetcher(shell: shell, resolver: resolver),
       resolveRemoteInfo: resolveRemoteInfoFetcher(shell: shell, resolver: resolver),
       batchPullRequests: batchPullRequestsFetcher(shell: shell, resolver: resolver),
+      pullRequestDetails: pullRequestDetailsFetcher(shell: shell, resolver: resolver),
       mergePullRequest: mergePullRequestFetcher(shell: shell, resolver: resolver),
       closePullRequest: closePullRequestFetcher(shell: shell, resolver: resolver),
       markPullRequestReady: markPullRequestReadyFetcher(shell: shell, resolver: resolver),
@@ -227,6 +243,16 @@ extension GithubCLIClient: DependencyKey {
     latestRun: { _, _ in nil },
     resolveRemoteInfo: { _ in nil },
     batchPullRequests: { _, _, _, _ in [:] },
+    pullRequestDetails: { _, _, _, _ in
+      GithubPullRequestDetails(
+        number: 1,
+        title: "Test pull request",
+        state: "OPEN",
+        headRefName: "feature-branch",
+        isCrossRepository: false,
+        headRepositoryOwner: GithubPullRequestDetails.Owner(login: "testowner")
+      )
+    },
     mergePullRequest: { _, _, _, _ in },
     closePullRequest: { _, _, _ in },
     markPullRequestReady: { _, _, _ in },
@@ -486,6 +512,30 @@ nonisolated private func batchPullRequestsFetcher(
       chunkResults,
       chunkCount: chunks.count
     )
+  }
+}
+
+nonisolated private func pullRequestDetailsFetcher(
+  shell: ShellClient,
+  resolver: GithubCLIExecutableResolver
+) -> @Sendable (_ host: String, _ owner: String, _ repo: String, _ number: Int) async throws ->
+  GithubPullRequestDetails {
+  { host, owner, repo, number in
+    let output = try await runGh(
+      shell: shell,
+      resolver: resolver,
+      arguments: [
+        "pr",
+        "view",
+        "\(number)",
+        "--repo",
+        "\(host)/\(owner)/\(repo)",
+        "--json",
+        "number,title,state,headRefName,isCrossRepository,headRepositoryOwner",
+      ],
+      repoRoot: nil
+    )
+    return try GithubCLIOutput.decode(GithubPullRequestDetails.self, from: output)
   }
 }
 

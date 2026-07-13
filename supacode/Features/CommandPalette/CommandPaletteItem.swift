@@ -88,6 +88,7 @@ struct CommandPaletteItem: Identifiable, Equatable {
     case openFailingCheckDetails(Worktree.ID)
     case runScript(ScriptDefinition)
     case stopScript(UUID, name: String)
+    case openGithubURL(GithubURL)
     #if DEBUG
       case debugTestToast(RepositoriesFeature.StatusToast)
     #endif
@@ -114,6 +115,8 @@ struct CommandPaletteItem: Identifiable, Equatable {
     case .renameBranch:
       true
     case .runScript, .stopScript:
+      true
+    case .openGithubURL:
       true
     #if DEBUG
       case .debugTestToast:
@@ -144,6 +147,8 @@ struct CommandPaletteItem: Identifiable, Equatable {
       false
     case .runScript, .stopScript:
       false
+    case .openGithubURL:
+      false
     #if DEBUG
       case .debugTestToast:
         false
@@ -173,7 +178,8 @@ struct CommandPaletteItem: Identifiable, Equatable {
       .removeWorktree,
       .archiveWorktree,
       .renameBranch,
-      .stopScript:
+      .stopScript,
+      .openGithubURL:
       nil
     case .runScript(let definition):
       definition.kind == .run ? AppShortcuts.runScript : nil

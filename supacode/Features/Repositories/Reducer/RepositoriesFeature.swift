@@ -284,7 +284,7 @@ struct RepositoriesFeature {
     case requestAddRemoteRepository
     case requestEditRemoteRepository(Repository.ID)
     case remoteConnectionForm(PresentationAction<RemoteConnectionFormFeature.Action>)
-    case requestCloneRepository
+    case requestCloneRepository(prefillURL: String?)
     case cloneRepositoryForm(PresentationAction<CloneRepositoryFormFeature.Action>)
     case removeRemoteRepository(Repository.ID)
     /// Kick off async SSH resolution of every persisted remote config; streams

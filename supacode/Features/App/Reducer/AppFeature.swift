@@ -86,6 +86,10 @@ struct AppFeature {
     var lastKnownAgentPresenceBadgesEnabled: Bool
     var pendingDeeplinks: [Deeplink] = []
     var isDeeplinkReferenceRequested = false
+    /// Single-slot continuation for palette-initiated GitHub URL navigation:
+    /// set when the target repo isn't open yet (clone form shown), consumed
+    /// one-shot on `openRepositoriesFinished`, cleared on clone cancel.
+    var pendingGithubNavigation: GithubURL?
     /// Cached projection of every primitive the menu-bar `WorktreeCommands`
     /// body reads. The menu observes ONE Equatable field instead of pulling
     /// `\.repositories` / `\.settings` (whole-substate) observation through
@@ -196,6 +200,10 @@ struct AppFeature {
     case settings(SettingsFeature.Action)
     case updates(UpdatesFeature.Action)
     case commandPalette(CommandPaletteFeature.Action)
+    case resumeGithubNavigation(GithubURL)
+    case githubURLRepositoryMatched(GithubURL, Repository.ID?, isResume: Bool)
+    case githubPullRequestDetailsLoaded(
+      GithubURL, repositoryID: Repository.ID, Result<GithubPullRequestDetails, any Error>)
     case openActionSelectionChanged(OpenWorktreeAction)
     case worktreeSettingsLoaded(RepositorySettings, worktreeID: Worktree.ID)
     case openSelectedWorktree
@@ -242,6 +250,8 @@ struct AppFeature {
   @Dependency(AnalyticsClient.self) private var analyticsClient
   @Dependency(AppLifecycleClient.self) private var appLifecycleClient
   @Dependency(DeeplinkClient.self) private var deeplinkClient
+  @Dependency(GitClientDependency.self) var gitClient
+  @Dependency(GithubCLIClient.self) var githubCLI
   @Dependency(RepositoryPersistenceClient.self) private var repositoryPersistence
   @Dependency(WorkspaceClient.self) private var workspaceClient
   @Dependency(NotificationSoundClient.self) private var notificationSoundClient
@@ -1125,10 +1135,31 @@ struct AppFeature {
       case .repositories(.repositoriesLoaded), .repositories(.openRepositoriesFinished):
         // Flush pending deeplinks after initial load completes, even when repositoriesChanged
         // delegate does not fire (e.g., zero repos loaded with no state change).
-        guard !state.pendingDeeplinks.isEmpty else { return .none }
-        let pending = state.pendingDeeplinks
-        state.pendingDeeplinks.removeAll()
-        return .merge(pending.map { .send(.deeplink($0)) })
+        var effects: [Effect<Action>] = []
+        if !state.pendingDeeplinks.isEmpty {
+          let pending = state.pendingDeeplinks
+          state.pendingDeeplinks.removeAll()
+          effects.append(contentsOf: pending.map { .send(.deeplink($0)) })
+        }
+        // GitHub URL navigation resumes only on openRepositoriesFinished (the
+        // clone-completion path). A still-presented clone form means this event
+        // came from an unrelated open (File > Open, CLI) racing the clone, so
+        // the slot must survive it. Re-sent as an action (not handled inline)
+        // because this core reducer runs before the repositories child — the
+        // cloned repo isn't in `state.repositories.repositories` yet.
+        if case .repositories(.openRepositoriesFinished) = action,
+          state.repositories.cloneRepositoryForm == nil,
+          let pendingNavigation = state.pendingGithubNavigation
+        {
+          state.pendingGithubNavigation = nil
+          effects.append(.send(.resumeGithubNavigation(pendingNavigation)))
+        }
+        return effects.isEmpty ? .none : .merge(effects)
+
+      case .repositories(.cloneRepositoryForm(.presented(.delegate(.cancel)))),
+        .repositories(.cloneRepositoryForm(.dismiss)):
+        state.pendingGithubNavigation = nil
+        return .none
 
       case .repositories:
         return .none
@@ -1253,8 +1284,22 @@ struct AppFeature {
           return .send(.repositories(.showToast(toast)))
       #endif
 
+      case .commandPalette(.delegate(.openGithubURL(let url))):
+        return handleGithubURLNavigation(url, state: &state)
+
       case .commandPalette:
         return .none
+
+      case .resumeGithubNavigation(let url):
+        return handleGithubURLNavigation(url, isResume: true, state: &state)
+
+      case .githubURLRepositoryMatched(let url, let repositoryID, let isResume):
+        return handleGithubURLRepositoryMatched(
+          url, repositoryID: repositoryID, isResume: isResume, state: &state)
+
+      case .githubPullRequestDetailsLoaded(let url, let repositoryID, let result):
+        return handleGithubPullRequestDetailsLoaded(
+          url, repositoryID: repositoryID, result: result, state: &state)
 
       case .terminalEvent(
         .notificationReceived(let worktreeID, let surfaceID, let title, let body, let isViewed)):

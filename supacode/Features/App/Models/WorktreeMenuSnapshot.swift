@@ -129,7 +129,8 @@ extension AppFeature.Action {
       .navigateSearchPrevious, .endSearch,
       .systemNotificationsPermissionFailed, .deeplinkReceived,
       .deeplink, .commandAckTimedOut, .deeplinkConfirmationTimedOut,
-      .deeplinkReferenceOpened, .alert, .deeplinkInputConfirmation:
+      .deeplinkReferenceOpened, .alert, .deeplinkInputConfirmation,
+      .resumeGithubNavigation, .githubURLRepositoryMatched, .githubPullRequestDetailsLoaded:
       return false
     }
   }
