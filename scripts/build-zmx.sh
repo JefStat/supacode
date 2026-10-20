@@ -10,6 +10,8 @@ srcroot="${SRCROOT:-$(cd "${script_dir}/.." && pwd)}"
 # Plain assignment, separate export, so a selector failure aborts under set -e.
 DEVELOPER_DIR="$("${script_dir}/select-developer-dir.sh")"
 export DEVELOPER_DIR
+SDKROOT="$("${script_dir}/zig-sdk.sh")"
+export SDKROOT
 repo_root="${srcroot}"
 zmx_dir="${srcroot}/ThirdParty/zmx"
 zmx_submodule_path="${zmx_dir#"${repo_root}/"}"
