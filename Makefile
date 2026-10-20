@@ -20,7 +20,7 @@ TUIST_SOURCE_GENERATION_STAMP := $(TUIST_GENERATION_STAMP_DIR)/none
 TUIST_RELEASE_GENERATION_STAMP := $(TUIST_GENERATION_STAMP_DIR)/development-release
 # Test targets use explicit source globs expanded at generation time, so a new
 # test file must trigger a regen or it would silently run in no bundle.
-TUIST_GENERATION_INPUTS := Project.swift Workspace.swift Tuist.swift Tuist/Package.swift $(wildcard Tuist/Package.resolved) $(PROJECT_CONFIG_PATH) mise.toml scripts/build-ghostty.sh scripts/build-zmx.sh $(wildcard supacodeTests/*.swift)
+TUIST_GENERATION_INPUTS := Project.swift Workspace.swift Tuist.swift Tuist/Package.swift $(wildcard Tuist/Package.resolved) $(PROJECT_CONFIG_PATH) mise.toml Makefile Tuist/patches/tca-navigation-stack-main-actor.patch scripts/build-ghostty.sh scripts/build-zmx.sh $(wildcard supacodeTests/*.swift)
 TUIST_GENERATE_CACHE_PROFILE ?= development
 TUIST_CACHE_CONFIGURATION ?= Debug
 VERSION ?=
@@ -64,6 +64,8 @@ generate-project-sources: $(TUIST_SOURCE_GENERATION_STAMP) # Resolve packages an
 $(TUIST_INSTALL_STAMP): $(TUIST_GENERATION_INPUTS) | preflight
 	mkdir -p "$(TUIST_GENERATION_STAMP_DIR)"
 	mise exec -- tuist install $(TUIST_INSTALL_FLAGS)
+	for link in Tuist/.build/checkouts/*; do [ -L "$$link" ] || continue; target="$$(readlink "$$link")"; rm "$$link"; cp -cR "$$target" "$$link"; chmod -R u+w "$$link"; done
+	patch -R -p1 -s --dry-run -d Tuist/.build/checkouts/swift-composable-architecture < Tuist/patches/tca-navigation-stack-main-actor.patch > /dev/null 2>&1 || patch -p1 -s -d Tuist/.build/checkouts/swift-composable-architecture < Tuist/patches/tca-navigation-stack-main-actor.patch
 	touch "$@"
 
 $(TUIST_GENERATION_STAMP_DIR)/%: $(TUIST_GENERATION_INPUTS) $(TUIST_INSTALL_STAMP)
@@ -71,7 +73,9 @@ $(TUIST_GENERATION_STAMP_DIR)/%: $(TUIST_GENERATION_INPUTS) $(TUIST_INSTALL_STAM
 	find "$(TUIST_GENERATION_STAMP_DIR)" -mindepth 1 -maxdepth 1 ! -name '.installed' -delete
 	rm -rf supacode.xcodeproj supacode.xcworkspace
 	rm -rf "$(DERIVED_DATA_PATH)"
+	$(SELECT_DEVELOPER_DIR); \
 	mise exec -- tuist generate --no-open --cache-profile "$*"
+	find "$(CURRENT_MAKEFILE_DIR)/Tuist/.build/tuist-derived" -name project.pbxproj -exec sed -i '' -E 's/MACOSX_DEPLOYMENT_TARGET = 10\.[0-9]+;/MACOSX_DEPLOYMENT_TARGET = 12.0;/' {} +
 	touch "$@"
 
 # Consumes the warmed Release binary cache, so archive compiles only the app shell.
@@ -80,7 +84,9 @@ $(TUIST_RELEASE_GENERATION_STAMP): $(TUIST_GENERATION_INPUTS) $(TUIST_INSTALL_ST
 	find "$(TUIST_GENERATION_STAMP_DIR)" -mindepth 1 -maxdepth 1 ! -name '.installed' -delete
 	rm -rf supacode.xcodeproj supacode.xcworkspace
 	rm -rf "$(DERIVED_DATA_PATH)"
+	$(SELECT_DEVELOPER_DIR); \
 	mise exec -- tuist generate --no-open --cache-profile development --configuration Release
+	find "$(CURRENT_MAKEFILE_DIR)/Tuist/.build/tuist-derived" -name project.pbxproj -exec sed -i '' -E 's/MACOSX_DEPLOYMENT_TARGET = 10\.[0-9]+;/MACOSX_DEPLOYMENT_TARGET = 12.0;/' {} +
 	touch "$@"
 
 doctor: # Diagnose build prerequisites and print the fix for each failure

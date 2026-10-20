@@ -11,8 +11,8 @@ repo_root="${srcroot}"
 # Plain assignment, separate export, so a selector failure aborts under set -e.
 DEVELOPER_DIR="$("${script_dir}/select-developer-dir.sh")"
 export DEVELOPER_DIR
-SDKROOT="$("${script_dir}/zig-sdk.sh")"
-export SDKROOT
+zig_sdk_bin="$("${script_dir}/zig-sdk.sh")"
+[ -z "${zig_sdk_bin}" ] || export PATH="${zig_sdk_bin}:${PATH}"
 ghostty_dir="${srcroot}/ThirdParty/ghostty"
 ghostty_submodule_path="${ghostty_dir#"${repo_root}/"}"
 ghostty_build_root="${srcroot}/.build/ghostty"
@@ -172,7 +172,7 @@ if [ -f "${ghostty_fingerprint_path}" ] &&
 fi
 
 cd "${ghostty_dir}"
-mise exec -- zig build -Doptimize=ReleaseFast -Demit-xcframework=true -Dsentry=false --prefix "${ghostty_build_root}" --cache-dir "${ghostty_local_cache_dir}" --global-cache-dir "${ghostty_global_cache_dir}"
+mise exec -- zig build -Doptimize=ReleaseFast -Demit-xcframework=true -Demit-macos-app=false -Dsentry=false --prefix "${ghostty_build_root}" --cache-dir "${ghostty_local_cache_dir}" --global-cache-dir "${ghostty_global_cache_dir}"
 rsync -a --delete "${ghostty_dir}/macos/GhosttyKit.xcframework/" "${xcframework_path}/"
 prepare_xcframework
 printf '%s\n' "${fingerprint}" > "${ghostty_fingerprint_path}"

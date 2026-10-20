@@ -1,0 +1,10 @@
+--- a/Sources/ComposableArchitecture/Observation/NavigationStack+Observation.swift
++++ b/Sources/ComposableArchitecture/Observation/NavigationStack+Observation.swift
+@@ -150,5 +150,6 @@
+   /// navigation tools, and in particular see <doc:StackBasedNavigation> for information on using
+   /// this view.
++  @MainActor
+   public init<State, Action, Destination: View, R>(
+     path: Binding<Store<StackState<State>, StackAction<State, Action>>>,
+     @ViewBuilder root: () -> R,
+     @ViewBuilder destination: @escaping (Store<State, Action>) -> Destination,

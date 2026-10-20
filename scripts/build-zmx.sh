@@ -10,8 +10,8 @@ srcroot="${SRCROOT:-$(cd "${script_dir}/.." && pwd)}"
 # Plain assignment, separate export, so a selector failure aborts under set -e.
 DEVELOPER_DIR="$("${script_dir}/select-developer-dir.sh")"
 export DEVELOPER_DIR
-SDKROOT="$("${script_dir}/zig-sdk.sh")"
-export SDKROOT
+zig_sdk_bin="$("${script_dir}/zig-sdk.sh")"
+[ -z "${zig_sdk_bin}" ] || export PATH="${zig_sdk_bin}:${PATH}"
 repo_root="${srcroot}"
 zmx_dir="${srcroot}/ThirdParty/zmx"
 zmx_submodule_path="${zmx_dir#"${repo_root}/"}"
@@ -96,7 +96,7 @@ mkdir -p "$(dirname "${zmx_binary_path}")"
 lipo -create "${slice_paths[@]}" -output "${zmx_binary_path}"
 
 # Defense in depth: -verify_arch fails closed on a partial / thin lipo output, but exits silently.
-if ! lipo "${zmx_binary_path}" -verify_arch x86_64 arm64; then
+if ! lipo "${zmx_binary_path}" -verify_arch x86_64 || ! lipo "${zmx_binary_path}" -verify_arch arm64; then
   echo "error: zmx universal binary at ${zmx_binary_path} is missing x86_64 or arm64 slice" >&2
   exit 1
 fi
